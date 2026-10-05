@@ -1,12 +1,17 @@
 name: Build APK
 on:
-  push:
   workflow_dispatch:
+  push:
+    branches: [main]
+concurrency:
+  group: build-apk
+  cancel-in-progress: true
 permissions:
   contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/setup-java@v4
         with:
@@ -297,37 +302,4 @@ jobs:
                   item {
                       InfoCard(
                           "\u0986\u09a8\u09c1\u09ae\u09be\u09a8\u09bf\u0995 \u09ae\u09cb\u099f \u09ac\u09cd\u09af\u09ac\u09b9\u09be\u09b0 ($years \u09ac\u099b\u09b0\u09c7)",
-                          "${fmtLong((estHours * 3_600_000).toLong())}\n(\u09b8\u09be\u09ae\u09cd\u09aa\u09cd\u09b0\u09a4\u09bf\u0995 \u09a6\u09c8\u09a8\u09bf\u0995 \u0997\u09a1\u09bc \u09a6\u09bf\u09af\u09bc\u09c7 \u09b9\u09bf\u09b8\u09be\u09ac \u0995\u09b0\u09be \u0985\u09a8\u09c1\u09ae\u09be\u09a8)"
-                      )
-                  }
-                  item { Text("\u098f\u0987 \u09b8\u09ae\u09af\u09bc\u09c7 \u0986\u09aa\u09a8\u09bf \u09af\u09be \u0995\u09b0\u09a4\u09c7 \u09aa\u09be\u09b0\u09a4\u09c7\u09a8", style = MaterialTheme.typography.titleMedium) }
-                  items(ideas) { (t, b) -> InfoCard(t, b) }
-                  item { Text("\u09ae\u099c\u09be\u09b0 \u09b9\u09bf\u09b8\u09be\u09ac (\u098f\u0995\u099f\u09c1 \u09ad\u09c1\u09b2 \u09b9\u09b2\u09c7 \u09b0\u09be\u0997 \u0995\u09b0\u09ac\u09c7\u09a8 \u09a8\u09be)", style = MaterialTheme.typography.titleMedium) }
-                  items(funny) { (t, b) -> InfoCard(t, b) }
-                  item {
-                      InfoCard(
-                          "\u099b\u09cb\u099f \u09aa\u09b0\u09bf\u09ac\u09b0\u09cd\u09a4\u09a8, \u09ac\u09a1\u09bc \u09ab\u09b2",
-                          "\u09aa\u09cd\u09b0\u09a4\u09bf\u09a6\u09bf\u09a8 \u09ae\u09be\u09a4\u09cd\u09b0 \u09e9\u09e6 \u09ae\u09bf\u09a8\u09bf\u099f \u0995\u09ae\u09be\u09b2\u09c7 $years \u09ac\u099b\u09b0\u09c7 \u09aa\u09cd\u09b0\u09be\u09af\u09bc ${(0.5 * 365 * years).toInt()} \u0998\u09a3\u09cd\u099f\u09be \u09ac\u09be\u0981\u099a\u09ac\u09c7\u0964 \u098f\u0987 \u09b8\u09ae\u09af\u09bc\u09c7 \u098f\u0995\u099f\u09bf \u09a8\u09a4\u09c1\u09a8 \u09a6\u0995\u09cd\u09b7\u09a4\u09be \u09b6\u09c1\u09b0\u09c1 \u0995\u09b0\u09a4\u09c7 \u09aa\u09be\u09b0\u09c7\u09a8\u0964"
-                      )
-                  }
-                  item { Text("\u0985\u09cd\u09af\u09be\u09aa \u0985\u09a8\u09c1\u09af\u09be\u09af\u09bc\u09c0 (\u0986\u099c)", style = MaterialTheme.typography.titleMedium) }
-                  items(todayApps) { app ->
-                      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                          Text(app.name)
-                          Text(fmt(app.millis))
-                      }
-                  }
-              }
-          }
-          EOF_5
-      - name: Build debug APK
-        run: gradle assembleDebug --no-daemon
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ScreenTime-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ github.run_number }}
-          name: Screen Time v${{ github.run_number }}
-          files: app/build/outputs/apk/debug/app-debug.apk
+                          "${fmtLong((estHours * 3_60
