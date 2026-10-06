@@ -8,6 +8,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -27,7 +28,6 @@ jobs:
           plugins {
               id("com.android.application") version "8.5.2" apply false
               id("org.jetbrains.kotlin.android") version "2.0.20" apply false
-              id("org.jetbrains.kotlin.plugin.compose") version "2.0.20" apply false
           }
           EOF_1
           cat > gradle.properties <<'EOF_2'
@@ -39,32 +39,33 @@ jobs:
           plugins {
               id("com.android.application")
               id("org.jetbrains.kotlin.android")
-              id("org.jetbrains.kotlin.plugin.compose")
           }
           android {
               namespace = "com.example.screentime"
               compileSdk = 34
               defaultConfig {
                   applicationId = "com.example.screentime"
-                  minSdk = 24
+                  minSdk = 26
                   targetSdk = 34
-                  versionCode = 1
-                  versionName = "1.0"
+                  versionCode = (project.findProperty("vCode") as String?)?.toInt() ?: 1
+                  versionName = "1." + versionCode
+              }
+              signingConfigs {
+                  create("ci") {
+                      storeFile = file("ci.jks")
+                      storePassword = "android"
+                      keyAlias = "key0"
+                      keyPassword = "android"
+                  }
+              }
+              buildTypes {
+                  debug { signingConfig = signingConfigs.getByName("ci") }
               }
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
                   targetCompatibility = JavaVersion.VERSION_17
               }
               kotlinOptions { jvmTarget = "17" }
-              buildFeatures { compose = true }
-          }
-          dependencies {
-              implementation(platform("androidx.compose:compose-bom:2024.09.03"))
-              implementation("androidx.compose.material3:material3")
-              implementation("androidx.compose.ui:ui")
-              implementation("androidx.activity:activity-compose:1.9.2")
-              implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
-              implementation("androidx.compose.material:material-icons-core")
           }
           EOF_3
           mkdir -p app/src/main
@@ -72,19 +73,19 @@ jobs:
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
               xmlns:tools="http://schemas.android.com/tools">
-              <uses-permission
-                  android:name="android.permission.PACKAGE_USAGE_STATS"
+
+              <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
                   tools:ignore="ProtectedPermissions" />
-              <queries>
-                  <intent>
-                      <action android:name="android.intent.action.MAIN" />
-                      <category android:name="android.intent.category.LAUNCHER" />
-                  </intent>
-              </queries>
+
               <application
-                  android:label="Screen Time"
-                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
-                  <activity android:name=".MainActivity" android:exported="true">
+                  android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="à¦¸à§à¦•à§à¦°à¦¿à¦¨ à¦Ÿà¦¾à¦‡à¦®"
+                  android:supportsRtl="true"
+                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
@@ -93,295 +94,234 @@ jobs:
               </application>
           </manifest>
           EOF_4
+          mkdir -p app/src/main/res/values
+          cat > app/src/main/res/values/colors.xml <<'EOF_5'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="ic_bg">#D6336C</color>
+          </resources>
+          EOF_5
+          mkdir -p app/src/main/res/drawable
+          cat > app/src/main/res/drawable/ic_fg.xml <<'EOF_6'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+              <path android:fillColor="#FFFFFF"
+                  android:pathData="M42,28 h24 a4,4 0 0 1 4,4 v44 a4,4 0 0 1 -4,4 h-24 a4,4 0 0 1 -4,-4 v-44 a4,4 0 0 1 4,-4 z" />
+              <path android:fillColor="#6750A4"
+                  android:pathData="M43,35 h22 v34 h-22 z" />
+          </vector>
+          EOF_6
+          mkdir -p app/src/main/res/mipmap-anydpi-v26
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF_7'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/ic_bg" />
+              <foreground android:drawable="@drawable/ic_fg" />
+          </adaptive-icon>
+          EOF_7
           mkdir -p app/src/main/java/com/example/screentime
-          cat > app/src/main/java/com/example/screentime/MainActivity.kt <<'EOF_5'
+          cat > app/src/main/java/com/example/screentime/UsageReader.kt <<'EOF_8'
           package com.example.screentime
 
           import android.app.AppOpsManager
           import android.app.usage.UsageStatsManager
           import android.content.Context
-          import android.content.Intent
-          import android.os.Build
-          import android.os.Bundle
-          import android.os.Process
-          import android.provider.Settings
-          import androidx.activity.ComponentActivity
-          import androidx.activity.compose.setContent
-          import androidx.activity.enableEdgeToEdge
-          import androidx.compose.foundation.isSystemInDarkTheme
-          import androidx.compose.foundation.layout.*
-          import androidx.compose.foundation.lazy.LazyColumn
-          import androidx.compose.foundation.lazy.items
-          import androidx.compose.foundation.lazy.itemsIndexed
-          import androidx.compose.foundation.shape.RoundedCornerShape
-          import androidx.compose.material.icons.Icons
-          import androidx.compose.material.icons.filled.Home
-          import androidx.compose.material.icons.filled.List
-          import androidx.compose.material.icons.filled.Refresh
-          import androidx.compose.material.icons.filled.Share
-          import androidx.compose.material.icons.filled.Star
-          import androidx.compose.material3.*
-          import androidx.compose.runtime.*
-          import androidx.compose.ui.Alignment
-          import androidx.compose.ui.Modifier
-          import androidx.compose.ui.draw.clip
-          import androidx.compose.ui.graphics.Color
-          import androidx.compose.ui.platform.LocalContext
-          import androidx.lifecycle.compose.LocalLifecycleOwner
-          import androidx.compose.ui.text.font.FontWeight
-          import androidx.compose.ui.text.style.TextAlign
-          import androidx.compose.ui.unit.dp
-          import androidx.lifecycle.Lifecycle
-          import androidx.lifecycle.LifecycleEventObserver
+          import org.json.JSONArray
+          import org.json.JSONObject
           import java.util.Calendar
 
-          class MainActivity : ComponentActivity() {
+          object UsageReader {
+
+              fun hasAccess(ctx: Context): Boolean {
+                  val ops = ctx.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+                  val mode = ops.checkOpNoThrow(
+                      AppOpsManager.OPSTR_GET_USAGE_STATS,
+                      android.os.Process.myUid(),
+                      ctx.packageName
+                  )
+                  return mode == AppOpsManager.MODE_ALLOWED
+              }
+
+              private fun dayStart(daysAgo: Int): Long {
+                  val c = Calendar.getInstance()
+                  c.add(Calendar.DAY_OF_YEAR, -daysAgo)
+                  c.set(Calendar.HOUR_OF_DAY, 0)
+                  c.set(Calendar.MINUTE, 0)
+                  c.set(Calendar.SECOND, 0)
+                  c.set(Calendar.MILLISECOND, 0)
+                  return c.timeInMillis
+              }
+
+              private fun minutes(usm: UsageStatsManager, from: Long, to: Long): Long =
+                  usm.queryAndAggregateUsageStats(from, to).values
+                      .sumOf { it.totalTimeInForeground } / 60000
+
+              /** {"today":à¦®à¦¿à¦¨à¦¿à¦Ÿ,"days":[à§­à¦Ÿà¦¾ à¦®à¦¿à¦¨à¦¿à¦Ÿ, à¦ªà§à¦°à¦¨à§‹ â†’ à¦—à¦¤à¦•à¦¾à¦²]} â€” à¦…à¦¨à§à¦®à¦¤à¦¿ à¦¨à¦¾ à¦¥à¦¾à¦•à¦²à§‡ "{}" */
+              fun json(ctx: Context): String {
+                  if (!hasAccess(ctx)) return "{}"
+                  val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+                  val days = JSONArray()
+                  for (i in 7 downTo 1) days.put(minutes(usm, dayStart(i), dayStart(i - 1)))
+                  return JSONObject()
+                      .put("today", minutes(usm, dayStart(0), System.currentTimeMillis()))
+                      .put("days", days)
+                      .toString()
+              }
+          }
+          EOF_8
+          mkdir -p app/src/main/java/com/example/screentime
+          cat > app/src/main/java/com/example/screentime/MainActivity.kt <<'EOF_9'
+          package com.example.screentime
+
+          import android.annotation.SuppressLint
+          import android.app.Activity
+          import android.app.AlertDialog
+          import android.content.Intent
+          import android.os.Bundle
+          import android.provider.Settings
+          import android.webkit.JavascriptInterface
+          import android.webkit.WebView
+
+          class MainActivity : Activity() {
+
+              private lateinit var web: WebView
+              private var wasGranted = false
+              private var lastLoad = 0L
+
+              inner class Bridge {
+                  @JavascriptInterface
+                  fun getScreenTime(): String = UsageReader.json(this@MainActivity)
+
+                  @JavascriptInterface
+                  fun share(text: String) {
+                      runOnUiThread {
+                          val i = Intent(Intent.ACTION_SEND).apply {
+                              type = "text/plain"
+                              putExtra(Intent.EXTRA_TEXT, text)
+                          }
+                          startActivity(Intent.createChooser(i, null))
+                      }
+                  }
+              }
+
+              @SuppressLint("SetJavaScriptEnabled")
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
-                  enableEdgeToEdge()
-                  setContent { AppTheme { ScreenTimeApp() } }
-              }
-          }
+                  web = WebView(this)
+                  setContentView(web)
+                  web.settings.javaScriptEnabled = true
+                  web.settings.domStorageEnabled = true
+                  web.addJavascriptInterface(Bridge(), "Android")
+                  wasGranted = UsageReader.hasAccess(this)
+                  web.loadUrl("file:///android_asset/index.html")
+                  lastLoad = System.currentTimeMillis()
 
-          @Composable
-          fun AppTheme(content: @Composable () -> Unit) {
-              val dark = isSystemInDarkTheme()
-              val ctx = LocalContext.current
-              val scheme = if (Build.VERSION.SDK_INT >= 31) {
-                  if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
-              } else {
-                  if (dark) darkColorScheme() else lightColorScheme()
-              }
-              MaterialTheme(colorScheme = scheme, content = content)
-          }
-
-          // ---------- Data ----------
-
-          data class AppUsage(val name: String, val millis: Long)
-          data class Data(val apps: List<AppUsage>, val lifeTotal: Long, val lifeSince: Long, val avgDaily: Long)
-
-          fun hasUsageAccess(ctx: Context): Boolean {
-              val ops = ctx.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-              val mode = ops.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), ctx.packageName)
-              return mode == AppOpsManager.MODE_ALLOWED
-          }
-
-          fun dayStart(daysAgo: Int): Long = Calendar.getInstance().apply {
-              add(Calendar.DAY_OF_YEAR, -daysAgo)
-              set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
-              set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-          }.timeInMillis
-
-          fun usageTotal(ctx: Context, start: Long, end: Long): Long {
-              val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-              val pm = ctx.packageManager
-              return usm.queryAndAggregateUsageStats(start, end).values
-                  .filter { pm.getLaunchIntentForPackage(it.packageName) != null }
-                  .sumOf { it.totalTimeInForeground }
-          }
-
-          fun loadData(ctx: Context): Data {
-              val now = System.currentTimeMillis()
-              val usm = ctx.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-              val pm = ctx.packageManager
-              val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_YEARLY, 0, now)
-                  .filter { it.totalTimeInForeground > 0 && pm.getLaunchIntentForPackage(it.packageName) != null }
-              val apps = stats.groupBy { it.packageName }.map { (pkg, list) ->
-                  val label = runCatching {
-                      pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
-                  }.getOrDefault(pkg)
-                  AppUsage(label, list.sumOf { it.totalTimeInForeground })
-              }.sortedByDescending { it.millis }
-              val total = apps.sumOf { it.millis }
-              val since = stats.minOfOrNull { it.firstTimeStamp } ?: now
-              val daysSince = ((now - since) / 86_400_000L).coerceAtLeast(1L)
-
-              val recent = (6 downTo 1).map { d -> usageTotal(ctx, dayStart(d), dayStart(d - 1)) }.filter { it > 0 }
-              val avg = if (recent.isNotEmpty()) recent.average().toLong() else total / daysSince
-              return Data(apps, total, since, avg)
-          }
-
-          fun f1(x: Double) = "%.1f".format(x)
-
-          fun fmt(ms: Long): String {
-              val m = ms / 60_000
-              return if (m >= 60) "${m / 60} \u0998\u09a3\u09cd\u099f\u09be ${m % 60} \u09ae\u09bf\u09a8\u09bf\u099f" else "$m \u09ae\u09bf\u09a8\u09bf\u099f"
-          }
-
-          fun hoursFor(avgDailyMs: Long, years: Int): Double = avgDailyMs.toDouble() * 365.0 * years / 3_600_000.0
-
-          // ---------- UI pieces ----------
-
-          @Composable
-          fun SectionTitle(t: String) {
-              Text(t, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-          }
-
-          @Composable
-          fun InfoCard(title: String, body: String) {
-              Card(
-                  Modifier.fillMaxWidth(),
-                  shape = RoundedCornerShape(20.dp),
-                  colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-              ) {
-                  Column(Modifier.padding(16.dp)) {
-                      Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-                      Spacer(Modifier.height(4.dp))
-                      Text(body, style = MaterialTheme.typography.bodyMedium)
+                  if (!wasGranted) {
+                      AlertDialog.Builder(this)
+                          .setTitle("à¦…à¦¨à§à¦®à¦¤à¦¿ à¦¦à¦°à¦•à¦¾à¦°")
+                          .setMessage("à¦†à¦œà¦•à§‡à¦° à¦“ à¦—à¦¤ à§­ à¦¦à¦¿à¦¨à§‡à¦° à¦¸à§à¦•à§à¦°à¦¿à¦¨ à¦Ÿà¦¾à¦‡à¦® à¦¨à¦¿à¦œà§‡ à¦¥à§‡à¦•à§‡ à¦¦à§‡à¦–à¦¾à¦¤à§‡ \"Usage access\" à¦…à¦¨à§à¦®à¦¤à¦¿ à¦²à¦¾à¦—à¦¬à§‡à¥¤ à¦ªà¦°à§‡à¦° à¦¸à§à¦•à§à¦°à¦¿à¦¨à§‡ \"à¦¸à§à¦•à§à¦°à¦¿à¦¨ à¦Ÿà¦¾à¦‡à¦®\" à¦…à§à¦¯à¦¾à¦ª à¦¬à§‡à¦›à§‡ à¦šà¦¾à¦²à§ à¦•à¦°à§à¦¨à¥¤")
+                          .setPositiveButton("à¦…à¦¨à§à¦®à¦¤à¦¿ à¦¦à¦¿à¦¨") { _, _ ->
+                              startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                          }
+                          .setNegativeButton("à¦ªà¦°à§‡", null)
+                          .show()
                   }
               }
-          }
 
-          @Composable
-          fun BigCard(label: String, big: String, sub: String, bg: Color, fg: Color) {
-              Card(
-                  Modifier.fillMaxWidth(),
-                  shape = RoundedCornerShape(28.dp),
-                  colors = CardDefaults.cardColors(containerColor = bg, contentColor = fg)
-              ) {
-                  Column(Modifier.padding(20.dp)) {
-                      Text(label, style = MaterialTheme.typography.titleMedium)
-                      Text(big, style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold)
-                      Text(sub, style = MaterialTheme.typography.bodyMedium)
+              override fun onResume() {
+                  super.onResume()
+                  val granted = UsageReader.hasAccess(this)
+                  val stale = System.currentTimeMillis() - lastLoad > 60_000
+                  if ((granted && !wasGranted) || (granted && stale)) {
+                      web.reload()
+                      lastLoad = System.currentTimeMillis()
                   }
-              }
-          }
-
-          // ---------- Screens ----------
-
-          @Composable
-          fun ScreenTimeApp() {
-              val ctx = LocalContext.current
-              var granted by remember { mutableStateOf(hasUsageAccess(ctx)) }
-              val owner = LocalLifecycleOwner.current
-              DisposableEffect(owner) {
-                  val obs = LifecycleEventObserver { _, e ->
-                      if (e == Lifecycle.Event.ON_RESUME) granted = hasUsageAccess(ctx)
-                  }
-                  owner.lifecycle.addObserver(obs)
-                  onDispose { owner.lifecycle.removeObserver(obs) }
-              }
-              if (granted) MainScreen() else PermissionScreen()
-          }
-
-          @Composable
-          fun PermissionScreen() {
-              val ctx = LocalContext.current
-              Column(
-                  Modifier.fillMaxSize().padding(24.dp),
-                  verticalArrangement = Arrangement.Center,
-                  horizontalAlignment = Alignment.CenterHorizontally
-              ) {
-                  Text("\u09b8\u09cd\u0995\u09cd\u09b0\u09bf\u09a8 \u099f\u09be\u0987\u09ae", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                  Spacer(Modifier.height(12.dp))
-                  Text(
-                      "\u09ab\u09cb\u09a8\u09c7\u09b0 \u09ac\u09cd\u09af\u09ac\u09b9\u09be\u09b0 \u09a6\u09c7\u0996\u09a4\u09c7 'Usage access' \u0985\u09a8\u09c1\u09ae\u09a4\u09bf \u09a6\u09bf\u09a8\u0964 \u09a4\u09a5\u09cd\u09af \u09b6\u09c1\u09a7\u09c1 \u0986\u09aa\u09a8\u09be\u09b0 \u09ab\u09cb\u09a8\u09c7\u0987 \u09a5\u09be\u0995\u09c7\u0964",
-                      textAlign = TextAlign.Center
-                  )
-                  Spacer(Modifier.height(20.dp))
-                  Button(onClick = { ctx.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }) {
-                      Text("\u09b8\u09c7\u099f\u09bf\u0982\u09b8 \u0996\u09c1\u09b2\u09c1\u09a8")
-                  }
-              }
-          }
-
-          @Composable
-          fun MainScreen() {
-              val ctx = LocalContext.current
-              var tab by remember { mutableStateOf(0) }
-              var refresh by remember { mutableStateOf(0) }
-              val data = remember(refresh) { loadData(ctx) }
-
-              val onShare: (String) -> Unit = { text ->
-                  val i = Intent(Intent.ACTION_SEND).apply {
-                      type = "text/plain"
-                      putExtra(Intent.EXTRA_TEXT, text)
-                  }
-                  ctx.startActivity(Intent.createChooser(i, null))
+                  wasGranted = granted
               }
 
-              Scaffold(
-                  bottomBar = {
-                      NavigationBar {
-                          NavigationBarItem(
-                              selected = tab == 0, onClick = { tab = 0 },
-                              icon = { Icon(Icons.Filled.Home, contentDescription = null) },
-                              label = { Text("\u09b9\u09cb\u09ae") }
-                          )
-                          NavigationBarItem(
-                              selected = tab == 1, onClick = { tab = 1 },
-                              icon = { Icon(Icons.Filled.Star, contentDescription = null) },
-                              label = { Text("\u09ae\u099c\u09be\u09b0 \u09b9\u09bf\u09b8\u09be\u09ac") }
-                          )
-                          NavigationBarItem(
-                              selected = tab == 2, onClick = { tab = 2 },
-                              icon = { Icon(Icons.Filled.List, contentDescription = null) },
-                              label = { Text("\u0985\u09cd\u09af\u09be\u09aa\u09b8") }
-                          )
-                      }
-                  }
-              ) { pad ->
-                  Box(Modifier.padding(pad)) {
-                      when (tab) {
-                          0 -> HomeTab(data, { refresh++ }, onShare)
-                          1 -> FunTab(data)
-                          else -> AppsTab(data)
-                      }
-                  }
+              @Deprecated("Deprecated in Java")
+              override fun onBackPressed() {
+                  if (web.canGoBack()) web.goBack() else super.onBackPressed()
               }
           }
-
-          @Composable
-          fun HomeTab(d: Data, onRefresh: () -> Unit, onShare: (String) -> Unit) {
-              val h5 = hoursFor(d.avgDaily, 5)
-              val h4 = hoursFor(d.avgDaily, 4)
-              val days5 = h5 / 24
-              val days4 = h4 / 24
-              val crore5 = h5 * 2000 / 1.0e7
-              val crore4 = h4 * 2000 / 1.0e7
-              val shareText = "\u0986\u09ae\u09bf \u09eb \u09ac\u099b\u09b0\u09c7 \u09ab\u09cb\u09a8\u09c7\u09b0 \u09aa\u09c7\u099b\u09a8\u09c7 \u09aa\u09cd\u09b0\u09be\u09af\u09bc ${days5.toInt()} \u09a6\u09bf\u09a8 \u09a6\u09bf\u09af\u09bc\u09c7\u099b\u09bf! \u0993\u0987 \u09b8\u09ae\u09af\u09bc \u0997\u09b0\u09c1\u09b0 \u0996\u09be\u09ae\u09be\u09b0 \u09a6\u09bf\u09b2\u09c7 \u0995\u09cb\u099f\u09bf\u09aa\u09a4\u09bf \u09b9\u09a4\u09be\u09ae!"
-
-              LazyColumn(
-                  Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                  verticalArrangement = Arrangement.spacedBy(14.dp)
-              ) {
-                  item {
-                      Row(
-                          Modifier.fillMaxWidth(),
-                          horizontalArrangement = Arrangement.SpaceBetween,
-                          verticalAlignment = Alignment.CenterVertically
-                      ) {
-                          Text(
-                              "\u09ab\u09cb\u09a8\u09c7\u09b0 \u09aa\u09c7\u099b\u09a8\u09c7 \u0995\u09a4 \u09b8\u09ae\u09af\u09bc?",
-                              style = MaterialTheme.typography.headlineSmall,
-                              fontWeight = FontWeight.Bold,
-                              modifier = Modifier.weight(1f)
-                          )
-                          IconButton(onClick = onRefresh) { Icon(Icons.Filled.Refresh, contentDescription = "\u09b0\u09bf\u09ab\u09cd\u09b0\u09c7\u09b6") }
-                      }
-                  }
-                  item {
-                      BigCard(
-                          "\u09eb \u09ac\u099b\u09b0\u09c7", "${days5.toInt()} \u09a6\u09bf\u09a8",
-                          "\u2248 ${f1(days5 / 30)} \u09ae\u09be\u09b8 \u09a6\u09bf\u09a8\u09b0\u09be\u09a4 \u098f\u0995\u099f\u09be\u09a8\u09be \u09ab\u09cb\u09a8\u09c7!",
-                          MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer
-                      )
-                  }
-                  item {
-                      BigCard(
-                          "\u09ea \u09ac\u099b\u09b0\u09c7", "${days4.toInt()} \u09a6\u09bf\u09a8",
-                          "\u2248 ${f1(days4 / 30)} \u09ae\u09be\u09b8 \u09a6\u09bf\u09a8\u09b0\u09be\u09a4 \u098f\u0995\u099f\u09be\u09a8\u09be \u09ab\u09cb\u09a8\u09c7!",
-                          MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer
-                      )
-                  }
-                  item {
-                      BigCard(
-                          "\u0997\u09b0\u09c1\u09b0 \u0996\u09be\u09ae\u09be\u09b0 \u09a6\u09bf\u09b2\u09c7 \u0995\u09cb\u099f\u09bf\u09aa\u09a4\u09bf \u09b9\u09a4\u09c7\u09a8!",
-                          "${f1(crore5)} \u0995\u09cb\u099f\u09bf",
-                          "\u09eb \u09ac\u099b\u09b0\u09c7 ${f1(crore5)} \u0995\u09cb\u099f\u09bf, \u09ea \u09ac\u099b\u09b0\u09c7 ${f1(crore4)} \u0995\u09cb\u099f\u09bf \u099f\u09be\u0995\u09be (\u0998\u09a3\u09cd\u099f\u09be\u09af\u09bc \u0997\u09a1\u09bc\u09c7 \u09ae\u09be\u09a4\u09cd\u09b0 \u09e8,\u09e6\u09e6\u09e6 \u099f\u09be\u0995\u09be \u09b2\u09be\u09ad \u09a7\u09b0\u09c7)\u0964 ${(h5 / 50).toInt()} \u099f\u09be \u0997\u09b0\u09c1\u09b0 \u09ae\u09be\u09b2\u09bf\u0995 \u09b9\u09a4\u09c7\u09a8, \u09aa\u09be\u09a1\u09bc\u09be\u09af\u09bc \u09b8\u09ac\u09be\u0987 '\u0996\u09be\u09ae\u09be\u09b0\u09bf \u09ad\u09be\u0987' \u09a1\u09be\u0995\u09a4!",
-                          MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer
-                      )
-                  }
-                  item { InfoCard("\u09b9\u09bf\u09b8\u09be\u09ac\u099f\u09be \u0995\u09c0\u09ad\u09be\u09ac\u09c7", "\u0986\u09aa\u09a8\u09be\u09b0 \u09b8\u09be\u09ae\u09cd\u09aa\u09cd\u09b0\u09a4\u09bf\u0995 \u09a6\u09c8\u09a8\u09bf\u0995 \u0997\u09a1\u09bc \u09ac\u09cd\u09af\u09ac\u09b9\u09be\u09b0 \u09a6\u09bf\u09af\u09bc\u09c7 \u09ea \u0993 \u09eb \u09ac\u099b\u09b0\u09c7\u09b0 \u0986\u09a8\u09c1\u09ae\u09be\u09a8\u09bf\u0995 \u09b9\u09bf\u09b8\u09be\u09ac \u0995\u09b0\u09be \u09b9\u09af\u09bc\u09c7\u099b\u09c7\u0964 \u098f\u0995\u099f\u09c1 \u09ad\u09c1\u09b2 \u09b9\u09a4\u09c7\u0987 \u09aa\u09be\u09b0\u09c7\u0964") }
-                  item {
-                      Button(onClick = { o
+          EOF_9
+          mkdir -p app/src/main/assets
+          cat > app/src/main/assets/index.html <<'EOF_10'
+          <!DOCTYPE html>
+          <html lang="bn"><head><meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+          <title>à¦¸à§à¦•à§à¦°à¦¿à¦¨ à¦Ÿà¦¾à¦‡à¦®</title>
+          <link rel="manifest" href="manifest.webmanifest">
+          <meta name="theme-color" content="#6750a4">
+          <link rel="apple-touch-icon" href="icon-192.png">
+          <script>try{document.documentElement.dataset.t=localStorage.getItem('T')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light')}catch(e){}</script>
+          <style>
+          :root{--bg:#fbf8ff;--fg:#1d1b20;--card:#fff;--mut:#6b6575;--p:#6750a4;--ring:#ece4f7;--sh:0 8px 28px rgba(103,80,164,.14)}
+          [data-t=dark]{--bg:#110f15;--fg:#ece6f0;--card:#1d1a22;--mut:#a59fb0;--p:#d0bcff;--ring:#2e2639;--sh:0 8px 28px rgba(0,0,0,.45)}
+          *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+          body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,"Noto Sans Bengali","Kalpurush",sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);min-height:100vh;background-image:radial-gradient(circle at 15% -5%,rgba(214,51,108,.18),transparent 45%),radial-gradient(circle at 100% 20%,rgba(103,80,164,.2),transparent 40%)}
+          main{max-width:560px;margin:auto;padding:16px 16px 40px;display:grid;gap:14px}
+          header{display:flex;justify-content:space-between;align-items:center}
+          h1{font-size:1.25rem;margin:0}
+          .ic{width:42px;height:42px;border-radius:50%;padding:0;background:var(--card);box-shadow:var(--sh);font-size:1.2rem;color:inherit}
+          .hero{border-radius:32px;padding:22px;color:#fff;background:linear-gradient(135deg,#6750a4,#d6336c);box-shadow:0 14px 34px rgba(214,51,108,.3);position:relative;overflow:hidden}
+          .hero:after{content:"ðŸ“±";position:absolute;right:-6px;top:-14px;font-size:7rem;opacity:.13;transform:rotate(-12deg)}
+          .hero .l{opacity:.9;font-size:.95rem}.big{font-size:2.7rem;font-weight:800;line-height:1.25}
+          .chips{display:flex;gap:8px;margin-top:14px}.chips div{flex:1;background:rgba(255,255,255,.2);border-radius:18px;padding:8px;text-align:center;font-weight:700;backdrop-filter:blur(6px)}
+          .chips small{display:block;font-weight:400;opacity:.85;font-size:.75rem}
+          .card{background:var(--card);border-radius:28px;padding:20px;box-shadow:var(--sh);border:1px solid var(--ring)}
+          .em{font-size:3.4rem;line-height:1;animation:b 2.2s ease-in-out infinite}
+          @keyframes b{50%{transform:translateY(-6px) rotate(-4deg)}}
+          .f{font-size:1.15rem;line-height:1.75;margin-top:10px;font-weight:500}
+          .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+          button{font:inherit;font-weight:600;border:0;border-radius:20px;padding:12px 14px;background:var(--p);color:var(--bg);cursor:pointer;transition:transform .12s}
+          button:active{transform:scale(.95)}button.o{background:transparent;color:var(--p);border:1px solid var(--p)}.row button{flex:1;white-space:nowrap}
+          .bar{height:12px;border-radius:8px;background:var(--ring);overflow:hidden;margin:10px 0 6px}
+          .bar i{display:block;height:100%;width:0;border-radius:8px;background:linear-gradient(90deg,#6750a4,#d6336c);transition:width 1.4s cubic-bezier(.2,.8,.2,1)}
+          .s{font-size:.9rem;color:var(--mut)}
+          .rise{animation:r .5s both}@keyframes r{from{opacity:0;transform:translateY(16px)}}
+          .tdy{display:flex;justify-content:space-between;align-items:center;gap:12px}
+          .tdy .big{font-size:2.1rem;color:var(--p)}.tdy .em2{font-size:2.6rem}
+          .wk{display:flex;align-items:flex-end;gap:8px;height:150px;margin-top:14px}
+          .wk div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;gap:4px;font-size:.72rem;color:var(--mut)}
+          .wk i{display:block;width:100%;height:0;border-radius:10px 10px 6px 6px;background:linear-gradient(180deg,#d6336c,#6750a4);transition:height 1.2s cubic-bezier(.2,.8,.2,1)}
+          .wk b{color:var(--fg);font-size:.78rem}
+          .wsum{display:flex;gap:8px;margin-top:14px}.wsum div{flex:1;background:var(--ring);border-radius:18px;padding:8px;text-align:center;font-weight:700}
+          .wsum small{display:block;font-weight:400;color:var(--mut);font-size:.75rem}
+          </style></head><body><main>
+          <header><h1>ðŸ“± à¦«à§‹à¦¨à§‡à¦° à¦ªà§‡à¦›à¦¨à§‡ à¦•à¦¤ à¦¸à¦®à¦¯à¦¼?</h1><button class="ic" id="th" aria-label="à¦¥à¦¿à¦®">ðŸŒ“</button></header>
+          <section class="card rise" style="animation-delay:.18s"><div class="tdy"><div><div class="s">à¦†à¦œà¦•à§‡à¦° à¦¸à§à¦•à§à¦°à¦¿à¦¨ à¦Ÿà¦¾à¦‡à¦®</div><div class="big" id="td"></div><div class="s" id="tds"></div></div><div class="em2">ðŸ“²</div></div><div class="row"><button class="o" id="tdb"></button></div></section>
+          <section class="card rise" style="animation-delay:.2s"><b>à¦—à¦¤ à§­ à¦¦à¦¿à¦¨à§‡à¦° à¦¸à§à¦•à§à¦°à¦¿à¦¨ à¦Ÿà¦¾à¦‡à¦®</b>
+          <div class="s" id="wh" style="margin-top:4px"></div><div class="wk" id="wk"></div>
+          <div class="wsum"><div id="wt"></div><div id="wa"></div><div id="wm"></div></div></section>
+          <section class="hero rise"><div class="l">à¦†à¦ªà¦¨à¦¿ à¦à¦–à¦¨ à¦ªà¦°à§à¦¯à¦¨à§à¦¤ à¦à¦¤ à¦˜à¦£à§à¦Ÿà¦¾ à¦«à§‹à¦¨à§‡ à¦¬à§à¦¯à¦¯à¦¼ à¦•à¦°à§‡à¦›à§‡à¦¨</div><div class="big" id="h"></div>
+          <div class="l">à¦…à¦°à§à¦¥à¦¾à§Ž</div><div class="big" id="d"></div>
+          <div class="chips"><div id="mo"></div><div id="yr"></div><div id="dl"></div></div></section>
+          <section class="card rise" style="animation-delay:.12s"><div class="em" id="em"></div><div class="f" id="f"></div>
+          <div class="row"><button class="o" id="share">ðŸ“¤ à¦¶à§‡à¦¯à¦¼à¦¾à¦°</button></div></section>
+          <section class="card rise" style="animation-delay:.24s"><b>à¦œà§‡à¦—à§‡ à¦¥à¦¾à¦•à¦¾ à¦¸à¦®à¦¯à¦¼à§‡à¦° à¦•à¦¤ à¦…à¦‚à¦¶ à¦«à§‹à¦¨à§‡?</b>
+          <div class="bar"><i id="bar"></i></div><div class="s" id="pc"></div></section>
+          <button id="inst" class="o" hidden>â¬‡ï¸ à¦¹à§‹à¦® à¦¸à§à¦•à§à¦°à¦¿à¦¨à§‡ à¦‡à¦¨à¦¸à§à¦Ÿà¦² à¦•à¦°à§à¦¨</button>
+          <p class="s" id="ios" hidden>iPhone-à¦: Share â†’ Add to Home Screen</p>
+          </main>
+          <script>
+          const $=s=>document.querySelector(s),bn=(n,d=0)=>Number(n).toLocaleString('bn-BD',{maximumFractionDigits:d});
+          let seed=crypto.getRandomValues(new Uint32Array(1))[0]^Date.now();
+          const rnd=()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};
+          const pick=a=>a[Math.floor(rnd()*a.length)];
+          let D,Y;try{D=+localStorage.getItem('D');Y=+localStorage.getItem('Y')}catch(e){}
+          if(!D||!Y){D=Math.round((3+rnd()*4.5)*2)/2;Y=Math.round((2+rnd()*6)*2)/2;try{localStorage.setItem('D',D);localStorage.setItem('Y',Y)}catch(e){}}
+          const H=D*365*Y,DAYS=H/24;
+          const B=[
+          `ðŸ” à¦à¦‡ à¦¸à¦®à¦¯à¦¼à¦Ÿà¦¾ à¦®à§à¦°à¦—à¦¿ à¦ªà¦¾à¦²à¦¨à§‡ à¦¦à¦¿à¦²à§‡, à¦†à¦œ à¦®à§à¦°à¦—à¦¿à¦° à¦¸à¦‚à¦–à§à¦¯à¦¾ à¦—à§à¦¨à¦¤à§‡ à¦¸à¦°à¦•à¦¾à¦°à§‡à¦° Census à¦²à¦¾à¦—à¦¤!`,
+          `ðŸ„ à¦à¦‡ à¦¸à¦®à¦¯à¦¼à¦Ÿà¦¾ à¦—à¦°à§à¦° à¦–à¦¾à¦®à¦¾à¦°à§‡ à¦¦à¦¿à¦²à§‡, à¦†à¦œ à¦—à¦°à§à¦—à§à¦²à§‹ à¦¤à§‹à¦®à¦¾à¦•à§‡ à¦®à¦¾à¦²à¦¿à¦• à¦¨à¦¾â€”à¦šà§‡à¦¯à¦¼à¦¾à¦°à¦®à§à¦¯à¦¾à¦¨ à¦¬à¦²à§‡ à¦¡à¦¾à¦•à¦¤!`,
+          `ðŸ“š à¦à¦‡ à¦¸à¦®à¦¯à¦¼à§‡ ${bn(Math.round(H/6))}à¦Ÿà¦¾ à¦¬à¦‡ à¦ªà¦¡à¦¼à¦²à§‡, à¦†à¦œ à¦†à¦‡à¦¨à¦¸à§à¦Ÿà¦¾à¦‡à¦¨ à¦¤à§‹à¦®à¦¾à¦° à¦•à¦¾à¦›à§‡ à¦à¦¸à§‡ à¦¬à¦²à¦¤â€”â€œà¦­à¦¾à¦‡, à¦à¦‡ à¦…à¦‚à¦•à¦Ÿà¦¾ à¦à¦•à¦Ÿà§ à¦¦à§‡à¦–à§‡à¦¨ à¦¤à§‹!â€`,
+          `ðŸ¥š à¦à¦‡ à¦¸à¦®à¦¯à¦¼à¦Ÿà¦¾ à¦¡à¦¿à¦® à¦¬à¦¿à¦•à§à¦°à¦¿à¦¤à§‡ à¦¦à¦¿à¦²à§‡, à¦†à¦œ à¦¡à¦¿à¦®à§‡à¦° à¦¦à¦¾à¦® à¦¤à§à¦®à¦¿ à¦ à¦¿à¦• à¦•à¦°à¦¤à§‡â€”à¦¬à¦¾à¦œà¦¾à¦° à¦¨à¦¾!`,
+          `ðŸŸ à¦à¦‡ à¦¸à¦®à¦¯à¦¼à¦Ÿà¦¾ à¦®à¦¾à¦› à¦šà¦¾à¦·à§‡ à¦¦à¦¿à¦²à§‡, à¦†à¦œ à¦®à¦¾à¦› à¦§à¦°à¦¾à¦° à¦†à¦—à§‡ à¦®à¦¾à¦›à§‡à¦° à¦•à¦¾à¦› à¦¥à§‡à¦•à§‡ Appointment à¦¨à¦¿à¦¤à§‡ à¦¹à¦¤à§‹!`,
+          `ðŸŒ¾ à¦à¦‡ à¦¸à¦®à¦¯à¦¼à¦Ÿà¦¾ à¦•à§ƒà¦·à¦¿à¦•à¦¾à¦œà§‡ à¦¦à¦¿à¦²à§‡, à¦†à¦œ à¦¤à§‹à¦®à¦¾à¦° à¦œà¦®à¦¿à¦° à¦ªà¦°à¦¿à¦®à¦¾à¦£ Google Maps-à¦ Zoom Out à¦•à¦°à§‡à¦“ à¦¦à§‡à¦–à¦¾ à¦¯à§‡à¦¤ à¦¨à¦¾!`,
+          `ðŸ’» à¦à¦‡ à¦¸à¦®à¦¯à¦¼à¦Ÿà¦¾ Coding-à¦ à¦¦à¦¿à¦²à§‡, à¦†à¦œ Google Search à¦•à¦°à¦¤â€”à¦¤à§‹à¦®à¦¾à¦° Website à¦•à§€à¦­à¦¾à¦¬à§‡ à¦¬à¦¾à¦¨à¦¾à¦¨à§‹ à¦¹à¦¯à¦¼à§‡à¦›à§‡!`,
+          `ðŸ’° à¦à¦‡ à¦¸à¦®à¦¯à¦¼à¦Ÿà¦¾ à¦Ÿà¦¾à¦•à¦¾ à¦•à¦¾à¦®à¦¾à¦¤à§‡ à¦¦à¦¿à¦²à§‡, à¦†à¦œ à¦•à§‹à¦Ÿà¦¿à¦ªà¦¤à¦¿ à¦¹à¦“à¦¯à¦¼à¦¾ à¦¤à§‹à¦®à¦¾à¦° Goal à¦¨à¦¾â€”Tax à¦•à¦® à¦¦à§‡à¦“à¦¯à¦¼à¦¾à¦‡ Goal à¦¹à¦¤à§‹! ðŸ˜‚`,
+          `ðŸ à¦à¦‡ à¦¸à¦®à¦¯à¦¼à¦Ÿà¦¾ à¦›à¦¾à¦—à¦² à¦ªà¦¾à¦²à¦¨à§‡ à¦¦à¦¿à¦²à§‡, à¦†à¦œ à¦ˆà¦¦à§‡à¦° à¦¬à¦¾à¦œà¦¾à¦°à§‡ à¦›à¦¾à¦—à¦² à¦•à¦¿à¦¨à¦¤à§‡ à¦®à¦¾à¦¨à§à¦· à¦¤à§‹à¦®à¦¾à¦° à¦•à¦¾à¦›à§‡ Loan à¦šà¦¾à¦‡à¦¤!`,
+          `ðŸ§  à¦à¦‡ à¦¸à¦®à¦¯à¦¼à¦Ÿà¦¾ à¦ªà¦¡à¦¼à¦¾à¦¶à§‹à¦¨à¦¾à¦¯à¦¼ à¦¦à¦¿à¦²à§‡, à¦†à¦œ à¦ªà¦°à§€à¦•à§à¦·à¦¾à¦° à¦ªà§à¦°à¦¶à§à¦¨à¦ªà¦¤à§à¦° à¦¤à§‹à¦®à¦¾à¦° à¦•à¦¾à¦›à§‡ à¦à¦¸à§‡ à¦¬à¦²à¦¤â€”â€œà¦­à¦¾à¦‡, à¦†à¦®à¦¾à¦•à§‡ à¦
